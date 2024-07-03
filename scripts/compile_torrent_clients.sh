@@ -4,7 +4,6 @@
 declare -g patches_dir
 declare -g output_dir
 declare -g archive_dir
-declare -g hash_dir
 declare -g rtorrentlevel
 declare -g rtorrentpipe
 declare -g stdc
@@ -273,7 +272,7 @@ function build_rtorrent() {
 depends_rtorrent
 
 # Create directories for hashes, output, and archive if they don't exist
-mkdir -p "${hash_dir}" "${output_dir}" "${archive_dir}" "${build_dir}"
+mkdir -p "${output_dir}" "${archive_dir}" "${build_dir}"
 
 # Compile each version
 for version in "${versions[@]}"; do
