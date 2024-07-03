@@ -1,0 +1,71 @@
+name: Compile rTorrent Binaries
+
+on:
+  schedule:
+    - cron: "0 */12 * * *"
+  push:
+    branches:
+      - main
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Check for libtorrent updates
+        id: libtorrent_update
+        run: |
+          last_commit_time=$(curl -s https://api.github.com/repos/rakshasa/libtorrent/commits | jq -r '.[0].commit.committer.date')
+          last_commit_timestamp=$(date -d "$last_commit_time" +%s)
+          current_time=$(date +%s)
+          time_diff=$(( (current_time - last_commit_timestamp) / 3600 ))
+          if (( time_diff <= 12 )); then
+            echo "libtorrent_updated=true" >> $GITHUB_OUTPUT
+          else
+            echo "libtorrent_updated=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if dist directories are empty
+        id: check_dist_dirs
+        run: |
+          if [ -z "$(ls -A dist/current)" ] && [ -z "$(ls -A dist/archive)" ]; then
+            echo "dist_empty=true" >> $GITHUB_OUTPUT
+          else
+            echo "dist_empty=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up dependencies
+        if: steps.libtorrent_update.outputs.libtorrent_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'false'
+        run: |
+          sudo apt-get update -yqq
+          sudo apt-get install -yqq build-essential autoconf automake libtool pkg-config curl git autoconf-archive \
+          bc checkinstall comerr-dev curl dos2unix dstat fontconfig \
+          libcppunit-dev libcurl4-openssl-dev libfontconfig1 libfontconfig1-dev libncurses5-dev libncursesw5-dev \
+          libsigc++-2.0-dev libssl-dev libtool mediainfo pkg-config rar screen subversion sysstat unzip \
+          yasm zip zlib1g-dev
+          sudo gem install fpm
+
+      - name: Compile and archive binaries
+        if: steps.libtorrent_update.outputs.libtorrent_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'false'
+        run: |
+          chmod +x scripts/compile_torrent_clients.sh
+          sudo ./scripts/compile_torrent_clients.sh
+
+      - name: Commit and push changes
+        if: steps.libtorrent_update.outputs.libtorrent_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'false'
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          if [[ -n $(git status -s) ]]; then
+            echo "Changes detected. Committing and pushing new binaries."
+            git add dist/
+            git commit -m "chore: update rTorrent binaries [automated commit]"
+            git push
+          else
+            echo "No changes detected."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
