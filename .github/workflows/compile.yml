@@ -2,7 +2,7 @@ name: Compile rTorrent Binaries
 
 on:
   schedule:
-    - cron: "0 */12 * * *"
+    - cron: "0 12 * * *"
 
 jobs:
   compile:
@@ -19,7 +19,7 @@ jobs:
           last_commit_timestamp=$(date -d "$last_commit_time" +%s)
           current_time=$(date +%s)
           time_diff=$(( (current_time - last_commit_timestamp) / 3600 ))
-          if (( time_diff <= 12 )); then
+          if (( time_diff <= 24 )); then
             echo "libtorrent_updated=true" >> $GITHUB_OUTPUT
           else
             echo "libtorrent_updated=false" >> $GITHUB_OUTPUT
