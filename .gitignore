@@ -1,2 +1,3 @@
 patches/deluge
 dist/build
+.vagrant/
