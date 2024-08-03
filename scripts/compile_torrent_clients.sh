@@ -39,6 +39,10 @@ archive_if_changed() {
     local new_file="$1"
     local old_file="$2"
     local app_name="$3"
+    local version
+
+    # Extract the version from the filename
+    version=$(basename "$new_file" | grep -oP '_(\d+\.\d+\.\d+)\.deb' | tr -d '_')
 
     if [[ ! -f "$new_file" ]]; then
         echo "New file $new_file does not exist. Skipping archive process."
@@ -49,7 +53,14 @@ archive_if_changed() {
         timestamp=$(date +%Y%m%d)
         archive_subdir="${archive_dir}/${app_name}"
         mkdir -p "$archive_subdir"
-        mv "$old_file" "${archive_subdir}/${app_name}_${timestamp}.deb"
+        mv "$old_file" "${archive_subdir}/${app_name}_${version}_${timestamp}.deb"
+        # Delete files in the archive that do not contain a version number
+        find "$archive_subdir" -type f -name "${app_name}_*.deb" | while read -r archived_file; do
+            if [[ ! $(basename "$archived_file") =~ _[0-9]+\.[0-9]+\.[0-9]+_[0-9]+\.deb ]]; then
+                echo "Deleting file without version number: $archived_file"
+                rm -f "$archived_file"
+            fi
+        done
         # Retain only the latest 3 versions in the archive
         files=("${archive_subdir}/${app_name}"*)
         if [[ ${#files[@]} -gt 3 ]]; then
