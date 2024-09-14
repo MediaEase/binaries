@@ -39,11 +39,7 @@ archive_if_changed() {
     local new_file="$1"
     local old_file="$2"
     local app_name="$3"
-    local version
-
-    # Extract the version from the filename
-    version=$(basename "$new_file" | grep -oP '_(\d+\.\d+\.\d+)\.deb' | tr -d '_')
-
+    local version="$4"
     if [[ ! -f "$new_file" ]]; then
         echo "New file $new_file does not exist. Skipping archive process."
         return
@@ -56,7 +52,7 @@ archive_if_changed() {
         mv "$old_file" "${archive_subdir}/${app_name}_${version}_${timestamp}.deb"
         # Delete files in the archive that do not contain a version number
         find "$archive_subdir" -type f -name "${app_name}_*.deb" | while read -r archived_file; do
-            if [[ ! $(basename "$archived_file") =~ _[0-9]+\.[0-9]+\.[0-9]+_[0-9]+\.deb ]]; then
+            if [[ ! $(basename "$archived_file") =~ _[0-9]+\.[0-9]+\.[0-9]+([-.][0-9]+)?_[0-9]+\.deb ]]; then
                 echo "Deleting file without version number: $archived_file"
                 rm -f "$archived_file"
             fi
@@ -172,20 +168,38 @@ function build_xmlrpc_c() {
     echo "Finished building xmlrpc-c"
     new_file="${build_dir}/xmlrpc-c_${VERSION}.deb"
     old_file="${output_dir}/xmlrpc-c_${VERSION}.deb"
-    archive_if_changed "$new_file" "$old_file" "xmlrpc-c"
+    archive_if_changed "$new_file" "$old_file" "xmlrpc-c" "$VERSION"
 }
 
 # Function to build libtorrent-rakshasa
 function build_libtorrent_rakshasa() {
     echo "Building libtorrent-rakshasa"
-    libtorrentloc="https://github.com/rakshasa/libtorrent/archive/refs/tags/v${libtorrentver}.tar.gz"
     cd /tmp || exit
     rm -rf /tmp/libtorrent
     mkdir /tmp/libtorrent
-    curl -sL "${libtorrentloc}" -o "/tmp/libtorrent-${libtorrentver}.tar.gz"
     VERSION=$libtorrentver
-    tar -xf "/tmp/libtorrent-${libtorrentver}.tar.gz" -C /tmp/libtorrent --strip-components=1
-    cd /tmp/libtorrent || exit
+
+    if [[ "${libtorrentver}" == "0.13.8" ]]; then
+        # Use git clone for version 0.13.8
+        git clone -b "v${libtorrentver}" --depth 1 https://github.com/rakshasa/libtorrent.git /tmp/libtorrent >/dev/null 2>&1 || {
+            echo "Error cloning libtorrent-rakshasa"
+            exit 1
+        }
+        cd /tmp/libtorrent || exit
+        commit_count=$(git rev-list --count HEAD)
+        echo "Total commits: ${commit_count}"
+        VERSION="${libtorrentver}.${commit_count}"
+        PACKAGE_VERSION="${libtorrentver}.${commit_count}"
+        PACKAGE_FILENAME="libtorrent-rakshasa_${libtorrentver}-${commit_count}.deb"
+    else
+        # Use tarball for other versions
+        libtorrentloc="https://github.com/rakshasa/libtorrent/archive/refs/tags/v${libtorrentver}.tar.gz"
+        curl -sL "${libtorrentloc}" -o "/tmp/libtorrent-${libtorrentver}.tar.gz"
+        tar -xf "/tmp/libtorrent-${libtorrentver}.tar.gz" -C /tmp/libtorrent --strip-components=1
+        cd /tmp/libtorrent || exit
+        PACKAGE_VERSION="${libtorrentver}"
+        PACKAGE_FILENAME="libtorrent-rakshasa_${libtorrentver}.deb"
+    fi
     if [[ ${libtorrentver} =~ ^("0.13.7"|"0.13.8")$ ]]; then
         patch -p1 <"${patches_dir}/libtorrent/throttle-fix-0.13.7-8.patch" >/dev/null
         if [[ ${libtorrentver} == "0.13.8" ]]; then
@@ -202,10 +216,12 @@ function build_libtorrent_rakshasa() {
             patch -p1 <"${patches_dir}/libtorrent/throttle-fix-0.13.6.patch" >/dev/null
         fi
     fi
-    ./autogen.sh >/dev/null || {
-        echo "Error running autogen.sh for libtorrent"
-        exit 1
-    }
+    if [[ -f "./autogen.sh" ]]; then
+        ./autogen.sh >/dev/null || {
+            echo "Error running autogen.sh for libtorrent"
+            exit 1
+        }
+    fi
     ./configure --prefix=/usr --enable-aligned >/dev/null || {
         echo "Error configuring libtorrent"
         exit 1
@@ -218,29 +234,44 @@ function build_libtorrent_rakshasa() {
         echo "Error installing libtorrent"
         exit 1
     }
-    libtorrent_binary="libtorrent-rakshasa_${rtorrentver}"
-    sudo fpm -f -C /tmp/dist/libtorrent-rakshasa -p "${build_dir}/${libtorrent_binary}.deb" -s dir -t deb -n libtorrent-rakshasa --version "${rtorrentver}" --description "libtorrent-rakshasa v${rtorrentver} compiled by MediaEase" >/dev/null
-    dpkg -i "${build_dir}/${libtorrent_binary}.deb" >/dev/null
+    sudo fpm -f -C /tmp/dist/libtorrent-rakshasa -p "${build_dir}/${PACKAGE_FILENAME}" -s dir -t deb -n libtorrent-rakshasa --version "${PACKAGE_VERSION}" --description "libtorrent-rakshasa v${PACKAGE_VERSION} compiled by MediaEase" >/dev/null
+    dpkg -i "${build_dir}/${PACKAGE_FILENAME}" >/dev/null
     cd /tmp || exit
     rm -rf /tmp/libtorrent
     echo "Finished building libtorrent-rakshasa"
-    new_file="${build_dir}/${libtorrent_binary}.deb"
-    old_file="${output_dir}/${libtorrent_binary}.deb"
-    archive_if_changed "$new_file" "$old_file" "libtorrent-rakshasa"
+    new_file="${build_dir}/${PACKAGE_FILENAME}"
+    old_file="${output_dir}/${PACKAGE_FILENAME}"
+    archive_if_changed "$new_file" "$old_file" "libtorrent-rakshasa" "$PACKAGE_VERSION"
 }
 
 # Function to build rtorrent
 function build_rtorrent() {
     echo "Building rtorrent"
-    rtorrentloc="https://github.com/rakshasa/rtorrent/archive/refs/tags/v${rtorrentver}.tar.gz"
     cd /tmp || exit
-    rm -rf /tmp/rtorrent*
+    rm -rf /tmp/rtorrent
     mkdir /tmp/rtorrent
-    curl -sL "${rtorrentloc}" -o "/tmp/rtorrent-${rtorrentver}.tar.gz"
-    tar -xzf "/tmp/rtorrent-${rtorrentver}.tar.gz" -C /tmp/rtorrent --strip-components=1
     VERSION=$rtorrentver
-    cd /tmp/rtorrent || exit
-    if [[ ${VERSION} == "0.9.8" ]]; then
+    if [[ "${rtorrentver}" == "0.9.8" ]]; then
+        git clone -b "v${rtorrentver}" --depth 1 https://github.com/rakshasa/rtorrent.git /tmp/rtorrent >/dev/null 2>&1 || {
+            echo "Error cloning rtorrent"
+            exit 1
+        }
+        cd /tmp/rtorrent || exit
+        commit_count=$(git rev-list --count HEAD)
+        echo "Total commits: ${commit_count}"
+        VERSION="${rtorrentver}.${commit_count}"
+        PACKAGE_VERSION="${rtorrentver}.${commit_count}"
+        PACKAGE_FILENAME="rtorrent_${rtorrentver}-${commit_count}.deb"
+    else
+        # Use tarball for other versions
+        rtorrentloc="https://github.com/rakshasa/rtorrent/archive/refs/tags/v${rtorrentver}.tar.gz"
+        curl -sL "${rtorrentloc}" -o "/tmp/rtorrent-${rtorrentver}.tar.gz"
+        tar -xzf "/tmp/rtorrent-${rtorrentver}.tar.gz" -C /tmp/rtorrent --strip-components=1
+        cd /tmp/rtorrent || exit
+        PACKAGE_VERSION="${rtorrentver}"
+        PACKAGE_FILENAME="rtorrent_${rtorrentver}.deb"
+    fi
+    if [[ ${VERSION} == "0.9.8"* ]]; then
         patch -p1 <"${patches_dir}/rtorrent/rtorrent-ml-fixes-0.9.8.patch" >/dev/null
         patch -p1 <"${patches_dir}/rtorrent/rtorrent-scrape-0.9.8.patch" >/dev/null
         patch -p1 <"${patches_dir}/rtorrent/fast-session-loading-0.9.8.patch" >/dev/null
@@ -254,10 +285,12 @@ function build_rtorrent() {
         patch -p1 <"${patches_dir}/rtorrent/rtorrent-0.9.6.patch" >/dev/null
         stdc="-std=c++11"
     fi
-    ./autogen.sh >/dev/null || {
-        echo "Error running autogen.sh for rtorrent"
-        exit 1
-    }
+    if [[ -f "./autogen.sh" ]]; then
+        ./autogen.sh >/dev/null || {
+            echo "Error running autogen.sh for rtorrent"
+            exit 1
+        }
+    fi
     ./configure --prefix=/usr --with-xmlrpc-c >/dev/null || {
         echo "Error configuring rtorrent"
         exit 1
@@ -270,13 +303,13 @@ function build_rtorrent() {
         echo "Error installing rtorrent"
         exit 1
     }
-    sudo fpm -f -C "/tmp/dist/rtorrent" -p "${build_dir}/rtorrent_${VERSION}.deb" -s dir -t deb -n rtorrent --version "${VERSION}" --description "rtorrent v${rtorrentver} compiled by MediaEase" >/dev/null
+    sudo fpm -f -C "/tmp/dist/rtorrent" -p "${build_dir}/${PACKAGE_FILENAME}" -s dir -t deb -n rtorrent --version "${PACKAGE_VERSION}" --description "rtorrent v${PACKAGE_VERSION} compiled by MediaEase" >/dev/null
     dpkg -r libtorrent-rakshasa >/dev/null 2>&1
     rm -rf /tmp/rtorrent
     echo "Finished building rtorrent"
-    new_file="${build_dir}/rtorrent_${VERSION}.deb"
-    old_file="${output_dir}/rtorrent_${VERSION}.deb"
-    archive_if_changed "$new_file" "$old_file" "rtorrent"
+    new_file="${build_dir}/${PACKAGE_FILENAME}"
+    old_file="${output_dir}/${PACKAGE_FILENAME}"
+    archive_if_changed "$new_file" "$old_file" "rtorrent" "$PACKAGE_VERSION"
 }
 
 # Install dependencies
