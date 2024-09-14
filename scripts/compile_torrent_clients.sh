@@ -69,7 +69,36 @@ archive_if_changed() {
 }
 
 # Define the versions to be compiled
-versions=("0.9.6" "0.9.7" "0.9.8")
+rt_versions=("0.9.6" "0.9.7" "0.9.8")
+del_versions=("2.1.1")
+qbit_versions=("4.6.5")
+function set_deluge_version() {
+    case $1 in
+    '2.1.1' | 211)
+        delugever='2.1.1'
+        libtorrentver='1.2.18'
+        ;;
+    *)
+        echo "Error: $1 is not a valid deluge version"
+        exit 1
+        ;;
+    esac
+    build_archive_dir "${app_name}" "${delugever}"
+}
+
+function set_qbittorrent_version() {
+    case $1 in
+    '4.5.2' | 452)
+        qbitver='4.5.2'
+        libtorrentver='1.2.18'
+        ;;
+    *)
+        echo "Error: $1 is not a valid qBittorrent version"
+        exit 1
+        ;;
+    esac
+    build_archive_dir "${app_name}" "${qbitver}"
+}
 
 # Function to set rTorrent version parameters and update output_dir, build_dir, and archive_dir accordingly
 function set_rtorrent_version() {
@@ -91,10 +120,16 @@ function set_rtorrent_version() {
         exit 1
         ;;
     esac
-    output_dir="$(pwd)/dist/current/${app_name}/${rtorrentver}"
-    build_dir="$(pwd)/dist/build/${app_name}/${rtorrentver}"
-    archive_dir="$(pwd)/dist/archive/${app_name}/${rtorrentver}"
-    mkdir -p "${output_dir}" "${build_dir}" "${archive_dir}"
+    build_archive_dir "${app_name}" "${rtorrentver}"
+}
+
+function build_archive_dir() {
+    local app_name="$1"
+    local version="$2"
+    output_dir="$(pwd)/dist/current/${app_name}/${version}"
+    build_dir="$(pwd)/dist/build/${app_name}/${version}"
+    archive_dir="$(pwd)/dist/archive/${app_name}/${version}"
+    mkdir -p "${output_dir}" "${build_dir}" "${version}"
 }
 
 # Function to configure rTorrent compilation parameters
@@ -118,7 +153,7 @@ function configure_rtorrent() {
 }
 
 # Function to install dependencies
-function depends_rtorrent() {
+function install_depends() {
     echo "Installing dependencies"
     cd /tmp || exit
     curl -sL https://github.com/Rudde/mktorrent/archive/v1.1.zip -o mktorrent.zip
@@ -317,13 +352,23 @@ function build_rtorrent() {
 }
 
 # Install dependencies
-depends_rtorrent
+install_depends
 
 # Compile each version
-for version in "${versions[@]}"; do
+for version in "${rt_versions[@]}"; do
     set_rtorrent_version "$version"
     configure_rtorrent
     build_xmlrpc_c
     build_libtorrent_rakshasa
     build_rtorrent
+done
+
+for version in "${del_versions[@]}"; do
+    set_deluge_version "$version"
+    build_libtorrent_rasterbar "1"
+done
+
+for version in "${qbit_versions[@]}"; do
+    set_qbittorrent_version "$version"
+    build_libtorrent_rasterbar "1"
 done
