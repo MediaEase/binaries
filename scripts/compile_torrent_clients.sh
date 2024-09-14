@@ -76,7 +76,7 @@ function set_deluge_version() {
     case $1 in
     '2.1.1' | 211)
         delugever='2.1.1'
-        libtorrentver='1.2.18'
+        libtorrentver='1.2.19'
         ;;
     *)
         echo "Error: $1 is not a valid deluge version"
@@ -217,7 +217,6 @@ function build_libtorrent_rakshasa() {
     rm -rf /tmp/libtorrent
     mkdir /tmp/libtorrent
     VERSION=$libtorrentver
-
     if [[ "${libtorrentver}" == "0.13.8" ]]; then
         # Use git clone for version 0.13.8
         git clone -b "v${libtorrentver}" --depth 1 https://github.com/rakshasa/libtorrent.git /tmp/libtorrent >/dev/null 2>&1 || {
@@ -281,6 +280,61 @@ function build_libtorrent_rakshasa() {
     new_file="${build_dir}/${PACKAGE_FILENAME}"
     old_file="${output_dir}/${PACKAGE_FILENAME}"
     archive_if_changed "$new_file" "$old_file" "libtorrent-rakshasa" "$PACKAGE_VERSION"
+}
+
+function build_libtorrent_rasterbar() {
+    local version="$1"
+    echo "Building libtorrent-rasterbar v${version}"
+    cd /tmp || exit
+    rm -rf /tmp/libtorrent-rasterbar
+    git clone -b "v${version}" --recurse-submodules --depth 1 https://github.com/arvidn/libtorrent.git /tmp/libtorrent-rasterbar || {
+        echo "Error cloning libtorrent-rasterbar v${version}"
+        exit 1
+    }
+    cd /tmp/libtorrent-rasterbar || exit
+    commit_count=$(git rev-list --count HEAD)
+    echo "Total commits: ${commit_count}"
+    PACKAGE_VERSION="${version}.${commit_count}"
+    PACKAGE_FILENAME="libtorrent-rasterbar_${PACKAGE_VERSION}.deb"
+    required_packages=("libboost-tools-dev" "libboost-dev" "libboost-all-dev" "libboost-system-dev" "build-essential")
+    local packages_to_install=()
+    for dep in "${required_packages[@]}"; do
+        if ! dpkg-query -W -f='${Status}' "${dep}" 2>/dev/null | grep -q "ok installed"; then
+            packages_to_install+=("${dep}")
+        fi
+    done
+    if [ ${#packages_to_install[@]} -ne 0 ]; then
+        sudo apt-get install -y "${packages_to_install[@]}" || {
+            echo "Error installing required packages"
+            exit 1
+        }
+    else
+        echo "All required packages are already installed."
+    fi
+    export BOOST_ROOT=/usr
+    echo "Building with Boost.Build"
+    echo "using gcc ;" >>~/user-config.jam
+    b2 crypto=openssl cxxstd=14 release || {
+        echo "Error building libtorrent-rasterbar"
+        exit 1
+    }
+    DESTDIR="/tmp/dist/libtorrent-rasterbar"
+    mkdir -p "${DESTDIR}"
+    b2 install --prefix="${DESTDIR}" || {
+        echo "Error installing libtorrent-rasterbar"
+        exit 1
+    }
+    sudo fpm -f -C "${DESTDIR}" -p "${build_dir}/${PACKAGE_FILENAME}" -s dir -t deb -n libtorrent-rasterbar --version "${PACKAGE_VERSION}" --description "libtorrent-rasterbar v${PACKAGE_VERSION}" || {
+        echo "Error packaging libtorrent-rasterbar"
+        exit 1
+    }
+    dpkg -i "${build_dir}/${PACKAGE_FILENAME}" || {
+        echo "Error installing libtorrent-rasterbar package"
+        exit 1
+    }
+    mv "${build_dir}/${PACKAGE_FILENAME}" "${output_dir}/${PACKAGE_FILENAME}"
+    archive_if_changed "${output_dir}/${PACKAGE_FILENAME}" "${archive_dir}/${PACKAGE_FILENAME}" "libtorrent-rasterbar" "${PACKAGE_VERSION}"
+    echo "Finished building and packaging libtorrent-rasterbar v${version}"
 }
 
 # Function to build rtorrent
@@ -365,10 +419,10 @@ done
 
 for version in "${del_versions[@]}"; do
     set_deluge_version "$version"
-    build_libtorrent_rasterbar "1"
+    build_libtorrent_rasterbar "1.2.19"
 done
 
 for version in "${qbit_versions[@]}"; do
     set_qbittorrent_version "$version"
-    build_libtorrent_rasterbar "1"
+    cp -pR
 done
