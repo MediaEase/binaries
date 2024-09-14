@@ -4,15 +4,15 @@
 declare -g patches_dir
 declare -g output_dir
 declare -g archive_dir
+declare -g build_dir
 declare -g rtorrentlevel
 declare -g rtorrentpipe
 declare -g stdc
+declare -g app_name
 
 # Assign values to global variables
 patches_dir="$(pwd)/patches"
-output_dir="$(pwd)/dist/current"
-archive_dir="$(pwd)/dist/archive"
-build_dir="$(pwd)/dist/build"
+app_name="rtorrent"
 
 # Function to calculate hash of a file
 calculate_hash() {
@@ -47,9 +47,9 @@ archive_if_changed() {
 
     if [[ -f "$old_file" ]] && has_changed "$new_file" "$old_file"; then
         timestamp=$(date +%Y%m%d)
-        archive_subdir="${archive_dir}/${app_name}"
+        archive_subdir="${archive_dir}/${app_name}/${rtorrentver}"
         mkdir -p "$archive_subdir"
-        mv "$old_file" "${archive_subdir}/${app_name}_${version}_${timestamp}.deb"
+        mv "$old_file" "${archive_subdir}/${app_name}-${version}_${timestamp}.deb"
         # Delete files in the archive that do not contain a version number
         find "$archive_subdir" -type f -name "${app_name}_*.deb" | while read -r archived_file; do
             if [[ ! $(basename "$archived_file") =~ _[0-9]+\.[0-9]+\.[0-9]+([-.][0-9]+)?_[0-9]+\.deb ]]; then
@@ -71,7 +71,7 @@ archive_if_changed() {
 # Define the versions to be compiled
 versions=("0.9.6" "0.9.7" "0.9.8")
 
-# Function to set rTorrent version parameters
+# Function to set rTorrent version parameters and update output_dir, build_dir, and archive_dir accordingly
 function set_rtorrent_version() {
     case $1 in
     '0.9.6' | 096)
@@ -91,6 +91,10 @@ function set_rtorrent_version() {
         exit 1
         ;;
     esac
+    output_dir="$(pwd)/dist/current/${app_name}/${rtorrentver}"
+    build_dir="$(pwd)/dist/build/${app_name}/${rtorrentver}"
+    archive_dir="$(pwd)/dist/archive/${app_name}/${rtorrentver}"
+    mkdir -p "${output_dir}" "${build_dir}" "${archive_dir}"
 }
 
 # Function to configure rTorrent compilation parameters
@@ -314,9 +318,6 @@ function build_rtorrent() {
 
 # Install dependencies
 depends_rtorrent
-
-# Create directories for hashes, output, and archive if they don't exist
-mkdir -p "${output_dir}" "${archive_dir}" "${build_dir}"
 
 # Compile each version
 for version in "${versions[@]}"; do
