@@ -296,21 +296,6 @@ function build_libtorrent_rasterbar() {
     echo "Total commits: ${commit_count}"
     PACKAGE_VERSION="${version}.${commit_count}"
     PACKAGE_FILENAME="libtorrent-rasterbar_${PACKAGE_VERSION}.deb"
-    required_packages=("libboost-tools-dev" "libboost-dev" "libboost-all-dev" "libboost-system-dev" "build-essential")
-    local packages_to_install=()
-    for dep in "${required_packages[@]}"; do
-        if ! dpkg-query -W -f='${Status}' "${dep}" 2>/dev/null | grep -q "ok installed"; then
-            packages_to_install+=("${dep}")
-        fi
-    done
-    if [ ${#packages_to_install[@]} -ne 0 ]; then
-        sudo apt-get install -y "${packages_to_install[@]}" || {
-            echo "Error installing required packages"
-            exit 1
-        }
-    else
-        echo "All required packages are already installed."
-    fi
     export BOOST_ROOT=/usr
     echo "Building with Boost.Build"
     echo "using gcc ;" >>~/user-config.jam
