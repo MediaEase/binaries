@@ -57,6 +57,14 @@ jobs:
           libsigc++-2.0-dev libssl-dev libtool mediainfo pkg-config rar screen subversion sysstat unzip \
           yasm zip zlib1g-dev libboost-tools-dev libboost-dev libboost-all-dev libboost-system-dev
           sudo gem install fpm
+          git clone --recursive https://github.com/boostorg/boost.git
+          cd boost
+          git checkout develop
+          sudo ./bootstrap.sh
+          sudo ./b2 -d0 headers
+          sudo ./b2 -j3 stage
+          sudo ./b2 -j3 --prefix=$HOME/.local install
+          cd
 
       - name: Compile and archive binaries
         if: steps.libtorrent_rakshasa_update.outputs.libtorrent_rakshasa_updated == 'true' || steps.libtorrent_rasterbar_update.outputs.libtorrent_rasterbar_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'false'

@@ -215,7 +215,7 @@ function build_libtorrent_rakshasa() {
     echo "Building libtorrent-rakshasa"
     cd /tmp || exit
     rm -rf /tmp/libtorrent
-    mkdir /tmp/libtorrent
+    mkdir -p /tmp/libtorrent
     VERSION=$libtorrentver
     if [[ "${libtorrentver}" == "0.13.8" ]]; then
         # Use git clone for version 0.13.8
@@ -287,29 +287,29 @@ function build_libtorrent_rasterbar() {
     echo "Building libtorrent-rasterbar v${version}"
     cd /tmp || exit
     rm -rf /tmp/libtorrent-rasterbar
-    git clone -b "v${version}" --recurse-submodules --depth 1 https://github.com/arvidn/libtorrent.git /tmp/libtorrent-rasterbar || {
+    git clone -b "v${version}" --recurse-submodules --depth 1 https://github.com/arvidn/libtorrent.git "/tmp/libtorrent-rasterbar/${version}" || {
         echo "Error cloning libtorrent-rasterbar v${version}"
         exit 1
     }
-    cd /tmp/libtorrent-rasterbar || exit
+    cd "/tmp/libtorrent-rasterbar/${version}" || exit
     commit_count=$(git rev-list --count HEAD)
     echo "Total commits: ${commit_count}"
     PACKAGE_VERSION="${version}.${commit_count}"
     PACKAGE_FILENAME="libtorrent-rasterbar_${PACKAGE_VERSION}.deb"
     export BOOST_ROOT=/usr
     echo "Building with Boost.Build"
-    echo "using gcc ;" >>~/user-config.jam
-    b2 crypto=openssl cxxstd=14 release || {
+    echo "using gcc ;" >>/root/user-config.jam
+    b2 --user-config=/root/user-config.jam crypto=openssl cxxstd=14 release -j"$(nproc)" || {
         echo "Error building libtorrent-rasterbar"
         exit 1
     }
     DESTDIR="/tmp/dist/libtorrent-rasterbar"
     mkdir -p "${DESTDIR}"
-    b2 install --prefix="${DESTDIR}" || {
+    b2 install --prefix="${DESTDIR}" -j"$(nproc)" || {
         echo "Error installing libtorrent-rasterbar"
         exit 1
     }
-    sudo fpm -f -C "${DESTDIR}" -p "${build_dir}/${PACKAGE_FILENAME}" -s dir -t deb -n libtorrent-rasterbar --version "${PACKAGE_VERSION}" --description "libtorrent-rasterbar v${PACKAGE_VERSION}" || {
+    sudo fpm -f -C "${DESTDIR}" -p "${build_dir}/${PACKAGE_FILENAME}" -s dir -t deb -n libtorrent-rasterbar --version "${PACKAGE_VERSION}" --description "libtorrent-rasterbar v${PACKAGE_VERSION}" -j"$(nproc)" || {
         echo "Error packaging libtorrent-rasterbar"
         exit 1
     }
@@ -327,7 +327,7 @@ function build_rtorrent() {
     echo "Building rtorrent"
     cd /tmp || exit
     rm -rf /tmp/rtorrent
-    mkdir /tmp/rtorrent
+    mkdir -p /tmp/rtorrent
     VERSION=$rtorrentver
     if [[ "${rtorrentver}" == "0.9.8" ]]; then
         git clone -b "v${rtorrentver}" --depth 1 https://github.com/rakshasa/rtorrent.git /tmp/rtorrent >/dev/null 2>&1 || {
