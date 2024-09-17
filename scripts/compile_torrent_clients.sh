@@ -217,17 +217,16 @@ function build_libtorrent_rakshasa() {
     rm -rf /tmp/libtorrent
     mkdir -p /tmp/libtorrent
     VERSION=$libtorrentver
-    if [[ "${libtorrentver}" == "0.13.8" ]]; then
+    if [[ "${VERSION}" == "0.13.8" ]]; then
         # Use git clone for version 0.13.8
-        git clone -b "v${libtorrentver}" --depth 1 https://github.com/rakshasa/libtorrent.git /tmp/libtorrent >/dev/null 2>&1 || {
+        git clone -b "v${VERSION}" --depth 1 https://github.com/rakshasa/libtorrent.git /tmp/libtorrent >/dev/null 2>&1 || {
             echo "Error cloning libtorrent-rakshasa"
             exit 1
         }
         cd /tmp/libtorrent || exit
         commit_count=$(git rev-list --count HEAD)
         echo "Total commits: ${commit_count}"
-        VERSION="${libtorrentver}.${commit_count}"
-        PACKAGE_VERSION="${libtorrentver}.${commit_count}"
+        PACKAGE_VERSION="${libtorrentver}-${commit_count}"
         PACKAGE_FILENAME="libtorrent-rakshasa_${libtorrentver}-${commit_count}.deb"
     else
         # Use tarball for other versions
@@ -238,18 +237,18 @@ function build_libtorrent_rakshasa() {
         PACKAGE_VERSION="${libtorrentver}"
         PACKAGE_FILENAME="libtorrent-rakshasa_${libtorrentver}.deb"
     fi
-    if [[ ${libtorrentver} =~ ^("0.13.7"|"0.13.8")$ ]]; then
+    if [[ ${VERSION} =~ ^("0.13.7"|"0.13.8")$ ]]; then
         patch -p1 <"${patches_dir}/libtorrent/throttle-fix-0.13.7-8.patch" >/dev/null
         if [[ ${libtorrentver} == "0.13.8" ]]; then
             patch -p1 <"${patches_dir}/libtorrent/piece-boundary-fix-0.13.8.patch" >/dev/null
         fi
     fi
-    if [[ ${libtorrentver} =~ ^("0.13.6"|"0.13.7")$ ]]; then
+    if [[ ${VERSION} =~ ^("0.13.6"|"0.13.7")$ ]]; then
         patch -p1 <"${patches_dir}/libtorrent/openssl.patch" >/dev/null
         if pkg-config --atleast-version=1.14 cppunit && [[ ${libtorrentver} == "0.13.6" ]]; then
             patch -p1 <"${patches_dir}/libtorrent/cppunit-libtorrent.patch" >/dev/null
         fi
-        if [[ ${libtorrentver} == "0.13.6" ]]; then
+        if [[ ${VERSION} == "0.13.6" ]]; then
             patch -p1 <"${patches_dir}/libtorrent/bencode-libtorrent.patch" >/dev/null
             patch -p1 <"${patches_dir}/libtorrent/throttle-fix-0.13.6.patch" >/dev/null
         fi
@@ -294,7 +293,7 @@ function build_libtorrent_rasterbar() {
     cd "/tmp/libtorrent-rasterbar/${version}" || exit
     commit_count=$(git rev-list --count HEAD)
     echo "Total commits: ${commit_count}"
-    PACKAGE_VERSION="${version}.${commit_count}"
+    PACKAGE_VERSION="${version}-${commit_count}"
     PACKAGE_FILENAME="libtorrent-rasterbar_${PACKAGE_VERSION}.deb"
     echo "Building with Boost.Build"
     echo "using gcc ;" >>/root/user-config.jam
@@ -328,7 +327,7 @@ function build_rtorrent() {
     rm -rf /tmp/rtorrent
     mkdir -p /tmp/rtorrent
     VERSION=$rtorrentver
-    if [[ "${rtorrentver}" == "0.9.8" ]]; then
+    if [[ "${VERSION}" == "0.9.8" ]]; then
         git clone -b "v${rtorrentver}" --depth 1 https://github.com/rakshasa/rtorrent.git /tmp/rtorrent >/dev/null 2>&1 || {
             echo "Error cloning rtorrent"
             exit 1
@@ -336,8 +335,7 @@ function build_rtorrent() {
         cd /tmp/rtorrent || exit
         commit_count=$(git rev-list --count HEAD)
         echo "Total commits: ${commit_count}"
-        VERSION="${rtorrentver}.${commit_count}"
-        PACKAGE_VERSION="${rtorrentver}.${commit_count}"
+        PACKAGE_VERSION="${rtorrentver}-${commit_count}"
         PACKAGE_FILENAME="rtorrent_${rtorrentver}-${commit_count}.deb"
     else
         # Use tarball for other versions
