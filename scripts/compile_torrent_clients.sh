@@ -296,7 +296,6 @@ function build_libtorrent_rasterbar() {
     echo "Total commits: ${commit_count}"
     PACKAGE_VERSION="${version}.${commit_count}"
     PACKAGE_FILENAME="libtorrent-rasterbar_${PACKAGE_VERSION}.deb"
-    export BOOST_ROOT=/usr
     echo "Building with Boost.Build"
     echo "using gcc ;" >>/root/user-config.jam
     b2 --user-config=/root/user-config.jam crypto=openssl cxxstd=14 release -j"$(nproc)" || {
@@ -309,7 +308,7 @@ function build_libtorrent_rasterbar() {
         echo "Error installing libtorrent-rasterbar"
         exit 1
     }
-    sudo fpm -f -C "${DESTDIR}" -p "${build_dir}/${PACKAGE_FILENAME}" -s dir -t deb -n libtorrent-rasterbar --version "${PACKAGE_VERSION}" --description "libtorrent-rasterbar v${PACKAGE_VERSION}" -j"$(nproc)" || {
+    sudo fpm -f -C "${DESTDIR}" -p "${build_dir}/${PACKAGE_FILENAME}" -s dir -t deb -n libtorrent-rasterbar --version "${PACKAGE_VERSION}" --description "libtorrent-rasterbar v${PACKAGE_VERSION}" || {
         echo "Error packaging libtorrent-rasterbar"
         exit 1
     }
