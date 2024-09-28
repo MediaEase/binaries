@@ -3,14 +3,17 @@ name: Compile Torrent Clients
 on:
   schedule:
     - cron: "0 12 * * *"
+  push:
+    branches:
+      - main
 
 jobs:
-  compile:
+  rtorrent:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Check for libtorrent-rakshasa updates
         id: libtorrent_rakshasa_update
@@ -25,62 +28,402 @@ jobs:
             echo "libtorrent_rakshasa_updated=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check for libtorrent-rasterbar updates
-        id: libtorrent_rasterbar_update
+      - name: Check if dist directories are empty
+        id: check_dist_dirs
         run: |
-          last_commit_time=$(curl -s https://api.github.com/repos/arvidn/libtorrent/commits | jq -r '.[0].commit.committer.date')
-          last_commit_timestamp=$(date -d "$last_commit_time" +%s)
-          current_time=$(date +%s)
-          time_diff=$(( (current_time - last_commit_timestamp) / 3600 ))
-          if (( time_diff <= 24 )); then
-            echo "libtorrent_rasterbar_updated=true" >> $GITHUB_OUTPUT
+          if [ -z "$(find dist -name '*.deb')" ]; then
+            echo "dist_empty=true" >> $GITHUB_OUTPUT
           else
-            echo "libtorrent_rasterbar_updated=false" >> $GITHUB_OUTPUT
+            echo "dist_empty=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up dependencies for rtorrent
+        if: steps.libtorrent_rakshasa_update.outputs.libtorrent_rakshasa_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'true'
+        run: |
+          sudo apt-get update -yqq
+          sudo apt-get install -yqq build-essential autoconf automake libtool pkg-config curl git autoconf-archive \
+          bc checkinstall comerr-dev curl dos2unix dstat fontconfig ruby-full \
+          libcppunit-dev libcurl4-openssl-dev libicu70 libfontconfig1 libfontconfig1-dev libncurses5-dev libncursesw5-dev \
+          libsigc++-2.0-dev libssl-dev libtool mediainfo pkg-config rar screen subversion sysstat unzip \
+          yasm zip zlib1g-dev
+          sudo gem install fpm
+
+      - name: Compile and archive rtorrent
+        if: steps.libtorrent_rakshasa_update.outputs.libtorrent_rakshasa_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'true'
+        run: |
+          chmod +x scripts/compile_rtorrent.sh
+          sudo ./scripts/compile_rtorrent.sh
+
+      - name: Commit and push changes for rtorrent
+        if: steps.libtorrent_rakshasa_update.outputs.libtorrent_rakshasa_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'true'
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          if [[ -n $(git status -s) ]]; then
+            echo "Changes detected. Committing and pushing new rtorrent binaries."
+            git add .
+            git commit -m "chore: update rtorrent binaries [automated commit]"
+            git push
+          else
+            echo "No changes detected."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  qbittorrent:
+    runs-on: ubuntu-latest
+
+    env:
+      boost_path: "${{ github.workspace }}/../boost"
+      harden_flags: "-D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
+      libtorrent_path: "${{ github.workspace }}/../libtorrent"
+      qbittorrent_path: "${{ github.workspace }}/../qbittorrent"
+      qt_version: "6.5.2"
+      qbittorrent_version: "5.0.0rc1"
+      qt_major_version: "6"
+
+    strategy:
+      matrix:
+        libtorrent_version: ["1.2.19", "2.0.6"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for client updates
+        id: client_updates
+        run: |
+          last_commit_time_libtorrent=$(curl -s https://api.github.com/repos/arvidn/libtorrent/commits | jq -r '.[0].commit.committer.date')
+          last_commit_time_qbittorrent=$(curl -s https://api.github.com/repos/qbittorrent/qBittorrent/commits | jq -r '.[0].commit.committer.date')
+          current_time=$(date +%s)
+          time_diff_libtorrent=$(( (current_time - $(date -d "$last_commit_time_libtorrent" +%s)) / 3600 ))
+          time_diff_qbittorrent=$(( (current_time - $(date -d "$last_commit_time_qbittorrent" +%s)) / 3600 ))
+          if (( time_diff_libtorrent <= 24 )) || (( time_diff_qbittorrent <= 24 )); then
+            echo "clients_updated=true" >> $GITHUB_OUTPUT
+          else
+            echo "clients_updated=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Check if dist directories are empty
         id: check_dist_dirs
         run: |
-          if [ -z "$(ls -A dist/current)" ] && [ -z "$(ls -A dist/archive)" ]; then
+          if [ -z "$(find dist -name '*.deb')" ]; then
             echo "dist_empty=true" >> $GITHUB_OUTPUT
           else
             echo "dist_empty=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Set up dependencies
-        if: steps.libtorrent_rakshasa_update.outputs.libtorrent_rakshasa_updated == 'true' || steps.libtorrent_rasterbar_update.outputs.libtorrent_rasterbar_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'false'
+        if: steps.client_updates.outputs.clients_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'true'
         run: |
           sudo apt-get update -yqq
-          sudo apt-get install -yqq build-essential autoconf automake libtool pkg-config curl git autoconf-archive \
-          bc checkinstall comerr-dev curl dos2unix dstat fontconfig \
-          libcppunit-dev libcurl4-openssl-dev libfontconfig1 libfontconfig1-dev libncurses5-dev libncursesw5-dev \
-          libsigc++-2.0-dev libssl-dev libtool mediainfo pkg-config rar screen subversion sysstat unzip \
-          yasm zip zlib1g-dev libboost-tools-dev libboost-dev libboost-all-dev libboost-system-dev
+          sudo apt-get install -yqq \
+            build-essential \
+            g++ \
+            autoconf \
+            automake \
+            libtool \
+            pkg-config \
+            curl \
+            git \
+            libssl-dev \
+            zlib1g-dev \
+            python3 \
+            python3-pip \
+            python3-setuptools \
+            python3-wheel \
+            ninja-build \
+            libxkbcommon-x11-dev \
+            libxcb-cursor-dev
           sudo gem install fpm
-          git clone --recursive https://github.com/boostorg/boost.git
-          cd boost
-          git checkout develop
-          sudo ./bootstrap.sh
-          sudo ./b2 -d0 headers
-          sudo ./b2 -j3 stage
-          sudo ./b2 -j3 --prefix=$HOME/.local install
-          cd
 
-      - name: Compile and archive binaries
-        if: steps.libtorrent_rakshasa_update.outputs.libtorrent_rakshasa_updated == 'true' || steps.libtorrent_rasterbar_update.outputs.libtorrent_rasterbar_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'false'
+      - name: Install Qt6
+        if: steps.client_updates.outputs.clients_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'true'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.qt_version }}
+          host: linux
+          target: desktop
+          arch: gcc_64
+          archives: qtbase qttools qttranslations
+          cache: true
+
+      - name: Install Boost libraries
+        if: steps.client_updates.outputs.clients_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'true'
+        env:
+          BOOST_MAJOR_VERSION: "1"
+          BOOST_MINOR_VERSION: "86"
+          BOOST_PATCH_VERSION: "0"
         run: |
-          chmod +x scripts/compile_torrent_clients.sh
-          sudo ./scripts/compile_torrent_clients.sh
+          boost_url="https://boostorg.jfrog.io/artifactory/main/release/${{ env.BOOST_MAJOR_VERSION }}.${{ env.BOOST_MINOR_VERSION }}.${{ env.BOOST_PATCH_VERSION }}/source/boost_${{ env.BOOST_MAJOR_VERSION }}_${{ env.BOOST_MINOR_VERSION }}_${{ env.BOOST_PATCH_VERSION }}.tar.gz"
+          boost_url2="https://sourceforge.net/projects/boost/files/boost/${{ env.BOOST_MAJOR_VERSION }}.${{ env.BOOST_MINOR_VERSION }}.${{ env.BOOST_PATCH_VERSION }}/boost_${{ env.BOOST_MAJOR_VERSION }}_${{ env.BOOST_MINOR_VERSION }}_${{ env.BOOST_PATCH_VERSION }}.tar.gz"
+          set +e
+          curl -L -o "${{ runner.temp }}/boost.tar.gz" "$boost_url"
+          tar -xf "${{ runner.temp }}/boost.tar.gz" -C "${{ github.workspace }}/.."; _exitCode="$?"
+          if [ "$_exitCode" -ne "0" ]; then
+            curl -L -o "${{ runner.temp }}/boost.tar.gz" "$boost_url2"
+            tar -xf "${{ runner.temp }}/boost.tar.gz" -C "${{ github.workspace }}/.."; _exitCode="$?"
+          fi
+          mv "${{ github.workspace }}/.."/boost_* "${{ env.boost_path }}"
 
-      - name: Commit and push changes
-        if: steps.libtorrent_rakshasa_update.outputs.libtorrent_rakshasa_updated == 'true' || steps.libtorrent_rasterbar_update.outputs.libtorrent_rasterbar_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'false'
+      - name: Install libtorrent for Qt6
+        if: steps.client_updates.outputs.clients_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'true'
+        run: |
+          libtorrent_version="${{ matrix.libtorrent_version }}"
+          if [[ "$libtorrent_version" == "2.0.6" ]]; then
+            libtorrent_branch="RC_2_0"
+          else
+            libtorrent_branch="RC_1_2"
+          fi
+          git clone \
+            --branch "${libtorrent_branch}" \
+            --depth 1 \
+            --recurse-submodules \
+            https://github.com/arvidn/libtorrent \
+            "${{ env.libtorrent_path }}"
+          cd "${{ env.libtorrent_path }}"
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DCMAKE_CXX_FLAGS="${{ env.harden_flags }}" \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_CXX_STANDARD=14 \
+            -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+            -DBoost_NO_SYSTEM_PATHS=ON \
+            -DBOOST_ROOT="${{ env.boost_path }}" \
+            -DCMAKE_PREFIX_PATH="${{ env.boost_path }}"
+          cmake --build build
+          sudo cmake --install build
+          ltver=$(echo "${libtorrent_version}" | tr '.' '_')
+          fpm \
+            --force \
+            --chdir build \
+            --package "libtorrent-rasterbar_${ltver}.deb" \
+            --input-type dir \
+            --output-type deb \
+            --name "libtorrent-rasterbar" \
+            --version "${libtorrent_version}" \
+            --architecture amd64 \
+            --description "libtorrent-rasterbar v${libtorrent_version} packaged by MediaEase"
+          mkdir -p /tmp/deb_files_compiled
+          mv "libtorrent-rasterbar_${ltver}.deb" /tmp/deb_files_compiled/
+
+      - name: Build qBittorrent
+        if: steps.client_updates.outputs.clients_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'true'
+        run: |
+          libtorrent_version="${{ matrix.libtorrent_version }}"
+          branch="v5_0_x"
+          git clone \
+            --branch "$branch" \
+            --depth 1 \
+            https://github.com/qbittorrent/qBittorrent \
+            "${{ env.qbittorrent_path }}"
+          cd "${{ env.qbittorrent_path }}"
+          export PATH="$HOME/Qt/${{ env.qt_version }}/gcc_64/bin:$PATH"
+          export PKG_CONFIG_PATH="$HOME/Qt/${{ env.qt_version }}/gcc_64/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export LD_LIBRARY_PATH="$HOME/Qt/${{ env.qt_version }}/gcc_64/lib:$LD_LIBRARY_PATH"
+          #libtorrent_version=$(cat libtorrent_version)
+          CXXFLAGS="$CXXFLAGS ${{ env.harden_flags }} -Werror" \
+          LDFLAGS="$LDFLAGS -gz" \
+          cmake \
+            -B build \
+            -G "Ninja" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DBOOST_ROOT="${{ env.boost_path }}" \
+            -DCMAKE_INSTALL_PREFIX="/usr" \
+            -DCMAKE_PREFIX_PATH="$HOME/Qt/${{ env.qt_version }}/gcc_64;${{ env.boost_path }}" \
+            -DTESTING=ON \
+            -DVERBOSE_CONFIGURE=ON \
+            -DQT6=ON \
+            -DBoost_NO_SYSTEM_PATHS=ON \
+            -DGUI=OFF \
+            .
+          cmake --build build
+          DESTDIR="$PWD/qbittorrent" cmake --install build
+          # Package qBittorrent
+          cd "$PWD/qbittorrent"
+          ltver=$(echo "$libtorrent_version" | tr '.' '_')
+          pkg_name="qbittorrent-nox_${{ env.qbittorrent_version }}_${ltver}_qt${{ env.qt_major_version }}"
+          mkdir -p /tmp/deb_files_compiled
+          fpm \
+            --force \
+            --chdir . \
+            --package "${pkg_name}.deb" \
+            --input-type dir \
+            --output-type deb \
+            --name "qbittorrent-nox" \
+            --version "${{ env.qbittorrent_version }}" \
+            --architecture amd64 \
+            --description "qBittorrent v${{ env.qbittorrent_version }} (no GUI) packaged by MediaEase"
+          mv "${pkg_name}.deb" "/tmp/deb_files_compiled/"
+
+      - name: Commit and push changes for qBittorrent Qt6
+        if: steps.client_updates.outputs.clients_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'true'
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           if [[ -n $(git status -s) ]]; then
-            echo "Changes detected. Committing and pushing new binaries."
-            git add dist/
-            git commit -m "chore: update Torrent client binaries [automated commit]"
+            echo "Changes detected. Committing and pushing new qBittorrent Qt6 binaries."
+            git add .
+            git commit -m "chore: update qBittorrent Qt6 binaries [automated commit]"
+            git push
+          else
+            echo "No changes detected."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deluge:
+    runs-on: ubuntu-latest
+
+    env:
+      boost_path: "${{ github.workspace }}/../boost"
+      harden_flags: "-D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
+      libtorrent_path: "${{ github.workspace }}/../libtorrent"
+      deluge_path: "${{ github.workspace }}/../deluge"
+      python: "3.9"
+
+    strategy:
+      matrix:
+        libtorrent: [2.0.6, 1.2.19]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for client updates
+        id: client_updates
+        run: |
+          last_commit_time_libtorrent=$(curl -s https://api.github.com/repos/arvidn/libtorrent/commits | jq -r '.[0].commit.committer.date')
+          last_commit_time_deluge=$(curl -s https://api.github.com/repos/deluge-torrent/deluge/commits | jq -r '.[0].commit.committer.date')
+          last_commit_time_qbittorrent=$(curl -s https://api.github.com/repos/qbittorrent/qBittorrent/commits | jq -r '.[0].commit.committer.date')
+          current_time=$(date +%s)
+          time_diff_libtorrent=$(( (current_time - $(date -d "$last_commit_time_libtorrent" +%s)) / 3600 ))
+          time_diff_deluge=$(( (current_time - $(date -d "$last_commit_time_deluge" +%s)) / 3600 ))
+          time_diff_qbittorrent=$(( (current_time - $(date -d "$last_commit_time_qbittorrent" +%s)) / 3600 ))
+          if (( time_diff_libtorrent <= 24 )) || (( time_diff_deluge <= 24 )) || (( time_diff_qbittorrent <= 24 )); then
+            echo "clients_updated=true" >> $GITHUB_OUTPUT
+          else
+            echo "clients_updated=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if dist directories are empty
+        id: check_dist_dirs
+        run: |
+          if [ -z "$(find dist -name '*.deb')" ]; then
+            echo "dist_empty=true" >> $GITHUB_OUTPUT
+          else
+            echo "dist_empty=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up dependencies for clients
+        if: steps.client_updates.outputs.clients_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'true'
+        run: |
+          sudo apt-get update -yqq
+          sudo apt-get install -yqq build-essential g++ autoconf automake libtool curl git autoconf-archive \
+          bc checkinstall comerr-dev curl dos2unix dstat fontconfig ruby-full libcppunit-dev libcurl4-openssl-dev \
+          python3-dev autotools-dev libicu-dev libbz2-dev libfontconfig1 libfontconfig1-dev libncurses5-dev libncursesw5-dev \
+          libsigc++-2.0-dev libssl-dev libicu70 mediainfo pkg-config rar screen subversion sysstat unzip \
+          yasm zip zlib1g-dev libboost-tools-dev libboost-dev libboost-all-dev libboost-system-dev ninja-build \
+          zlib1g-dev cmake python3 python3-pip python3-setuptools python3-wheel libxkbcommon-x11-dev libxcb-cursor-dev \
+          libgtk-3-dev libcairo2-dev libgirepository1.0-dev gobject-introspection python3-gi python3-gi-cairo
+          sudo gem install fpm
+
+      - name: Clone deluge
+        if: steps.client_updates.outputs.clients_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'true'
+        run: |
+          git clone \
+            --branch develop \
+            --depth 1 \
+            --recurse-submodules \
+            https://github.com/deluge-torrent/deluge.git ${{ env.deluge_path }}
+
+      - name: Install Boost libraries
+        if: steps.client_updates.outputs.clients_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'true'
+        env:
+          BOOST_MAJOR_VERSION: "1"
+          BOOST_MINOR_VERSION: "86"
+          BOOST_PATCH_VERSION: "0"
+        run: |
+          boost_url="https://boostorg.jfrog.io/artifactory/main/release/${{ env.BOOST_MAJOR_VERSION }}.${{ env.BOOST_MINOR_VERSION }}.${{ env.BOOST_PATCH_VERSION }}/source/boost_${{ env.BOOST_MAJOR_VERSION }}_${{ env.BOOST_MINOR_VERSION }}_${{ env.BOOST_PATCH_VERSION }}.tar.gz"
+          boost_url2="https://sourceforge.net/projects/boost/files/boost/${{ env.BOOST_MAJOR_VERSION }}.${{ env.BOOST_MINOR_VERSION }}.${{ env.BOOST_PATCH_VERSION }}/boost_${{ env.BOOST_MAJOR_VERSION }}_${{ env.BOOST_MINOR_VERSION }}_${{ env.BOOST_PATCH_VERSION }}.tar.gz"
+          set +e
+          curl -L -o "${{ runner.temp }}/boost.tar.gz" "$boost_url"
+          tar -xf "${{ runner.temp }}/boost.tar.gz" -C "${{ github.workspace }}/.."; _exitCode="$?"
+          if [ "$_exitCode" -ne "0" ]; then
+            curl -L -o "${{ runner.temp }}/boost.tar.gz" "$boost_url2"
+            tar -xf "${{ runner.temp }}/boost.tar.gz" -C "${{ github.workspace }}/.."; _exitCode="$?"
+          fi
+          mv "${{ github.workspace }}/.."/boost_* "${{ env.boost_path }}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.python}}
+
+      - name: Prepare pip
+        run: python3 -m pip install wheel setuptools==68.*
+
+      - name: Install Python dependencies
+        run: |
+          cd ${{ env.deluge_path }}
+          python3 -m pip install \
+          twisted[tls]==22.4.0 \
+          libtorrent==${{ matrix.libtorrent }} \
+          pyinstaller==4.10 \
+          pygame \
+          -r requirements.txt
+
+      - name: Install libtorrent
+        run: |
+          if [[ "${{ matrix.libtorrent }}" == "2.0.6" ]]; then branch="RC_2_0"; else branch="RC_1_2"; fi
+          if [[ "${{ matrix.libtorrent }}" == "2.0.6" ]]; then ltver="lt20"; else ltver="lt12"; fi
+          git clone \
+            --branch $branch \
+            --depth 1 \
+            --recurse-submodules \
+            https://github.com/arvidn/libtorrent.git \
+            ${{ env.libtorrent_path }}
+          cd ${{ env.libtorrent_path }}
+          CXXFLAGS="$CXXFLAGS ${{ env.harden_flags }}" \
+          cmake \
+            -B build \
+            -G "Ninja" \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DBOOST_ROOT="${{ env.boost_path }}" \
+          cmake --build build
+          sudo cmake --install build
+          fpm \
+            --force \
+            --chdir build \
+            --package libtorrent-rasterbar_$ltver.deb \
+            --input-type dir \
+            --output-type deb \
+            --name "libtorrent-rasterbar" \
+            --version ${{ matrix.libtorrent }} \
+            --architecture amd64 \
+            --description "libtorrent-rasterbar v${{ matrix.libtorrent }} packaged by MediaEase"
+          mkdir -p /tmp/deb_files_compiled
+          mv libtorrent-rasterbar_$ltver.deb /tmp/deb_files_compiled/libtorrent-rasterbar_$ltver.deb
+
+      - name: Install Deluge
+        working-directory: ${{ env.deluge_path }}
+        run: |
+          pip3 install --user tox
+
+      - name: Commit and push changes for clients
+        if: steps.client_updates.outputs.clients_updated == 'true' || steps.check_dist_dirs.outputs.dist_empty == 'true'
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          if [[ -n $(git status -s) ]]; then
+            echo "Changes detected. Committing and pushing new client binaries."
+            git add .
+            git commit -m "chore: update client binaries [automated commit]"
             git push
           else
             echo "No changes detected."
