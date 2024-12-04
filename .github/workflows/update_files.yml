@@ -1,0 +1,116 @@
+name: Update Files
+
+permissions: read-all
+
+on:
+  repository_dispatch:
+    types: [update-files]
+
+jobs:
+  update_manifest:
+    runs-on: ubuntu-24.04
+
+    env: 
+      REPO_PATH: "${{ github.workspace }}/binaries"
+
+    outputs:
+      manifest_updated: ${{ steps.update_manifest.outputs.manifest_updated }}
+      package_names: ${{ steps.extract_package_data.outputs.package_names }}
+      package_versions: ${{ steps.extract_package_data.outputs.package_versions }}
+    
+    steps:
+      - name: Checkout Binaries Repository
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.REPO_PATH }}
+          fetch-depth: 0
+
+      - name: Set up Environment
+        id: set_up_env
+        run: |
+          echo "TARBALL_PATHS=$(echo '${{ toJson(github.event.client_payload) }}' | jq -c '.tarball_paths')" >> $GITHUB_ENV
+          echo "TARBALL_NAMES=$(echo '${{ toJson(github.event.client_payload) }}' | jq -c '.tarball_names')" >> $GITHUB_ENV
+          echo "ARTIFACT_ID=$(echo '${{ toJson(github.event.client_payload) }}' | jq -c '.artifact_id')" >> $GITHUB_ENV
+          echo "ARTIFACT_URL=$(echo '${{ toJson(github.event.client_payload) }}' | jq -c '.artifact_url')" >> $GITHUB_ENV
+          echo "COMMIT_MESSAGE=$(echo '${{ toJson(github.event.client_payload) }}' | jq -c '.commit_message')" >> $GITHUB_ENV
+          echo "ARCHIVE_MESSAGE=$(echo '${{ toJson(github.event.client_payload) }}' | jq -c '.archive_message')" >> $GITHUB_ENV
+          echo "TMP_DIR=$(mktemp -d)" >> $GITHUB_ENV
+          echo "environment_setup=true" >> $GITHUB_OUTPUT
+
+      - name: Extract Payload
+        id: extract_payload
+        if: ${{ steps.set_up_env.outputs.environment_setup == 'true' }}
+        run: |
+          set -e
+          mkdir -p $TMP_DIR
+          echo "Downloading artifacts from URL: $ARTIFACT_URL"
+          wget --header="Authorization: token ${{ secrets.MEDIAEASE_ACCESS_TOKEN }}" -q -O $TMP_DIR/artifacts.tar.gz $ARTIFACT_URL
+          echo "Extracting artifacts..."
+          tar -xzf $TMP_DIR/artifacts.tar.gz -C $TMP_DIR
+          echo "Artifacts extracted to $TMP_DIR:"
+          tree $TMP_DIR
+          echo "payload_extracted=true" >> $GITHUB_OUTPUT
+
+      - name: Replace Old Binaries
+        id: replace_binaries
+        if: ${{ steps.extract_payload.outputs.payload_extracted == 'true' }}
+        run: |
+          STAGING_DIR="${{ github.workspace }}/staging"
+          mkdir -p $STAGING_DIR
+          REPO_DIR="${{ env.REPO_PATH }}"
+          echo "Processing new binaries..."
+          for new_file in $TMP_DIR/*.tar.gz; do
+            new_basename=$(basename $new_file)
+            package_name=$(echo $new_basename | sed -E 's/(.*)_[0-9]+\.[0-9]+\.[0-9]+-[0-9]+build[0-9]+.tar.gz/\1/')
+            echo "Looking for existing binaries for package: $package_name"
+            old_files=$(find $REPO_DIR -maxdepth 1 -type f -name "${package_name}_*.tar.gz")
+            if [[ -n "$old_files" ]]; then
+              echo "Moving old files for $package_name to staging:"
+              echo "$old_files"
+              mv $old_files $STAGING_DIR/
+            fi
+            echo "Adding new binary: $new_basename"
+            mv $new_file $REPO_DIR/
+          done
+          echo "Staging directory content:"
+          tree $STAGING_DIR
+          echo "Repository directory content:"
+          tree $REPO_DIR
+          echo "staging_dir=$STAGING_DIR" >> $GITHUB_ENV
+          echo "binaries_replaced=true" >> $GITHUB_OUTPUT
+
+      - name: Upload Artifacts
+        id: upload_artifacts
+        if: ${{ steps.replace_binaries.outputs.binaries_replaced == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: ${{ github.workspace }}/staging/*.tar.gz
+          if-no-files-found: error
+
+      - name: Update Release Repo
+        if: ${{ steps.upload_artifacts.outputs.outputs.artifact-id != '' }}
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.PAT }}
+          event-type: update-archives
+          repository: MediaEase/archived-binaries
+          client-payload: |
+            {
+              "artifact_id": "${{ steps.upload_artifacts.outputs.artifact-id }}",
+              "artifact_url": "${{ steps.upload_artifacts.outputs.artifact-url }}",
+              "archive_message": "$ARCHIVE_MESSAGE"
+            }
+      
+      - name: Commit and Push Changes
+        id: commit_and_push
+        if: ${{ steps.upload_artifacts.outputs.artifact_uploaded == 'true' }}
+        uses: EndBug/add-and-commit@v9
+        with:
+          author_name: "${{ secrets.COMMITTER_NAME }}"
+          author_email: "${{ secrets.COMMITTER_EMAIL }}"
+          default_author: user_info
+          message: "${{ env.COMMIT_MESSAGE }}"
+          push: true
+          pull: "--rebase --autostash"
+
